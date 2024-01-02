@@ -1,1 +1,1 @@
-# django_sprint4
+# Learning project Blogicum
