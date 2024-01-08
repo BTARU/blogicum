@@ -38,7 +38,7 @@ class PostDetailView(DetailView):
     model = Post
     pk_url_kwarg = 'post_pk'
 
-    def get_object(self, queryset=None):
+    def get_object(self):
         return get_object_or_404(
             Post.posts_fk_joined.filter(
                 (~Q(author=self.request.user.pk)
@@ -201,7 +201,7 @@ class CommentCreateView(LoginRequiredMixin, CreateView):
     model = Post
     form_class = CommentForm
 
-    def get_object(self, queryset=None):
+    def get_object(self):
         return get_object_or_404(
             self.model.published_posts.all(),
             pk=self.kwargs['post_pk']
