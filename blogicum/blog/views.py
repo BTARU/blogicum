@@ -3,7 +3,6 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db.models import Count, Q
-from django.http.response import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.utils import timezone
@@ -16,14 +15,14 @@ from .forms import CommentForm, PostForm
 from .models import Category, Comment, Post
 
 
-class PostListMixin:
+class PostListMixin(ListView):
     """Базовый класс для вывода множества постов."""
 
     model = Post
     paginate_by = PAGINATE_VALUE
 
 
-class PostListView(PostListMixin, ListView):
+class PostListView(PostListMixin):
     """Вывести на главной странице опубликованные, последние по дате посты."""
 
     template_name = 'blog/index.html'
@@ -38,7 +37,7 @@ class PostDetailView(DetailView):
     model = Post
     pk_url_kwarg = 'post_pk'
 
-    def get_object(self):
+    def get_object(self, queryset=None):
         return get_object_or_404(
             Post.posts_fk_joined.filter(
                 (~Q(author=self.request.user.pk)
@@ -84,10 +83,10 @@ class PostEditMixin(LoginRequiredMixin, UserPassesTestMixin):
     model = Post
     pk_url_kwarg = 'post_pk'
 
-    def test_func(self) -> bool | None:
+    def test_func(self):
         return self.get_object().author == self.request.user
 
-    def handle_no_permission(self) -> HttpResponseRedirect:
+    def handle_no_permission(self):
         return redirect(self.get_object())
 
 
@@ -109,7 +108,7 @@ class PostDeleteView(PostEditMixin, DeleteView):
         )
 
 
-class CategoryListView(PostListMixin, ListView):
+class CategoryListView(PostListMixin):
     """Отобразить описание категории и список постов запрошенной категории."""
 
     template_name = 'blog/category_detail.html'
@@ -134,7 +133,7 @@ class CategoryListView(PostListMixin, ListView):
         return context
 
 
-class ProfileListView(PostListMixin, ListView):
+class ProfileListView(PostListMixin):
     """Информация о пользователе и показ его публикаций."""
 
     template_name = 'blog/profile.html'
@@ -201,7 +200,7 @@ class CommentCreateView(LoginRequiredMixin, CreateView):
     model = Post
     form_class = CommentForm
 
-    def get_object(self):
+    def get_object(self, queryset=None):
         return get_object_or_404(
             self.model.published_posts.all(),
             pk=self.kwargs['post_pk']
