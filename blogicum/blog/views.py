@@ -1,46 +1,60 @@
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Count
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.db.models import Count, Q
+from django.http.response import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
+from django.utils import timezone
 from django.views.generic import (
     CreateView, DeleteView, DetailView, ListView, UpdateView
 )
 
-from blogicum.constants import PAGINATE_VALUE
-from blogicum.utils import paginate
+from core.constants import PAGINATE_VALUE
 from .forms import CommentForm, PostForm
 from .models import Category, Comment, Post
 
 
-class PostListView(ListView):
-    """Вывести на главной странице опубликованные, последние по дате посты."""
+class PostListMixin(ListView):
+    """Базовый класс для вывода множества постов."""
 
     model = Post
-    template_name = 'blog/index.html'
     paginate_by = PAGINATE_VALUE
-    queryset = Post.published_posts_query.all().annotate(
+
+
+class PostListView(PostListMixin):
+    """Вывести на главной странице опубликованные, последние по дате посты."""
+
+    template_name = 'blog/index.html'
+    queryset = Post.published_posts.all().annotate(
         Count('comments')
     ).order_by('-pub_date')
 
 
 class PostDetailView(DetailView):
-    """Отобразить запрошенный по id, опубликованный, не отложенный пост."""
+    """Вывести обьект поста с блоком комментариев."""
 
     model = Post
     pk_url_kwarg = 'post_pk'
-    queryset = Post.post_fk_joined_query.all()
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(
+            Post.posts_fk_joined.filter(
+                (~Q(author=self.request.user.pk)
+                 & Q(is_published=True)
+                 & Q(category__is_published=True)
+                 & Q(pub_date__lt=timezone.now())
+                 )
+                | Q(author=self.request.user.pk)
+            ),
+            pk=self.kwargs['post_pk']
+        )
 
     def get_context_data(self, **kwargs) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        if self.object.author != self.request.user:
-            self.object = get_object_or_404(
-                Post.published_posts_query.all(),
-                pk=self.kwargs['post_pk']
-            )
-        context['form'] = CommentForm()
+        if self.request.user.is_authenticated:
+            context['form'] = CommentForm()
         context['comments'] = (
             self.object.comments.select_related('author')
         )
@@ -64,29 +78,26 @@ class PostCreateView(LoginRequiredMixin, CreateView):
         )
 
 
-class PostBaseMixin(LoginRequiredMixin):
+class PostEditMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Базовый класс для работы с постами."""
 
     model = Post
     pk_url_kwarg = 'post_pk'
 
-    def dispatch(self, request, *args, **kwargs):
-        instance = get_object_or_404(
-            Post.post_fk_joined_query.all(),
-            pk=kwargs['post_pk']
-        )
-        if instance.author != request.user:
-            return redirect(instance)
-        return super().dispatch(request, *args, **kwargs)
+    def test_func(self) -> bool | None:
+        return self.get_object().author == self.request.user
+
+    def handle_no_permission(self) -> HttpResponseRedirect:
+        return redirect(self.get_object())
 
 
-class PostUpdateView(PostBaseMixin, UpdateView):
+class PostUpdateView(PostEditMixin, UpdateView):
     """Редактирование обьекта поста его автором."""
 
     form_class = PostForm
 
 
-class PostDeleteView(PostBaseMixin, DeleteView):
+class PostDeleteView(PostEditMixin, DeleteView):
     """Удаление обьекта поста его автором."""
 
     template_name = 'blog/post_form.html'
@@ -98,65 +109,63 @@ class PostDeleteView(PostBaseMixin, DeleteView):
         )
 
 
-class CategoryDetailView(DetailView):
+class CategoryListView(PostListMixin):
     """Отобразить описание категории и список постов запрошенной категории."""
 
-    model = Category
-    slug_url_kwarg = 'category'
-    queryset = Category.objects.filter(
-        is_published=True
-    )
+    template_name = 'blog/category_detail.html'
+    category_obj = None
+
+    def get_queryset(self):
+        self.category_obj = get_object_or_404(
+            Category.objects.filter(
+                is_published=True
+            ),
+            slug=self.kwargs['category']
+        )
+        return Post.published_posts.filter(
+            category__exact=self.category_obj
+        ).annotate(
+            Count('comments')
+        ).order_by('-pub_date')
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context['page_obj'] = paginate(
-            self.request,
-            Post.published_posts_query.filter(
-                category__exact=self.object
-            ).annotate(
-                Count('comments')
-            ).order_by('-pub_date'),
-            PAGINATE_VALUE
-        )
+        context['category'] = self.category_obj
         return context
 
 
-class ProfileBaseMixin:
-    """Базовый класс для работы с профилем пользователя."""
+class ProfileListView(PostListMixin):
+    """Информация о пользователе и показ его публикаций."""
+
+    template_name = 'blog/profile.html'
+    profile = None
+
+    def get_queryset(self):
+        self.profile = get_object_or_404(
+            get_user_model(),
+            username=self.kwargs['username']
+        )
+        profile_posts = Post.posts_fk_joined.all()
+        if self.request.user != self.profile:
+            profile_posts = Post.published_posts.all()
+        return profile_posts.filter(
+            author__exact=self.profile
+        ).annotate(
+            Count('comments')
+        ).order_by('-pub_date')
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['profile'] = self.profile
+        return context
+
+
+class ProfileUpdateView(LoginRequiredMixin, UpdateView):
+    """Редактирование обьекта пользователя."""
 
     model = get_user_model()
     slug_url_kwarg = 'username'
     slug_field = 'username'
-
-
-class ProfileDetailView(ProfileBaseMixin, DetailView):
-    """Информация о пользователе и показ его публикаций."""
-
-    template_name = 'blog/profile.html'
-    profile_posts = None
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        context = super().get_context_data(**kwargs)
-        if self.request.user == self.object:
-            self.profile_posts = Post.post_fk_joined_query.all()
-        else:
-            self.profile_posts = Post.published_posts_query.all()
-        context['profile'] = self.object
-        context['page_obj'] = paginate(
-            self.request,
-            self.profile_posts.filter(
-                author__exact=self.object
-            ).annotate(
-                Count('comments')
-            ).order_by('-pub_date'),
-            PAGINATE_VALUE
-        )
-        return context
-
-
-class ProfileUpdateView(LoginRequiredMixin, ProfileBaseMixin, UpdateView):
-    """Редактирование обьекта пользователя."""
-
     template_name = 'blog/user_edit.html'
     fields = ['username', 'first_name', 'last_name', 'email']
 
@@ -189,20 +198,18 @@ class CommentBaseMixin(LoginRequiredMixin):
 class CommentCreateView(LoginRequiredMixin, CreateView):
     """Создание обьекта комментария к посту."""
 
-    post_obj = None
-    model = Comment
+    model = Post
     form_class = CommentForm
 
-    def dispatch(self, request, *args, **kwargs):
-        self.post_obj = get_object_or_404(
-            Post.published_posts_query.all(),
-            pk=kwargs['post_pk']
+    def get_object(self, queryset=None):
+        return get_object_or_404(
+            self.model.published_posts.all(),
+            pk=self.kwargs['post_pk']
         )
-        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         form.instance.author = self.request.user
-        form.instance.post = self.post_obj
+        form.instance.post = self.get_object()
         return super().form_valid(form)
 
 

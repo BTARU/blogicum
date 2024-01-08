@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from core.models import BaseModel
-from blogicum.constants import (
+from core.constants import (
     SLUG_FIELD_MAX_LENGTH, TEXT_FIELD_MAX_LENGTH, TRUNCATE_AMOUNT
 )
 
@@ -121,10 +121,10 @@ class Post(BaseModel):
     )
 
     objects = models.Manager()
-    published_posts_query = PublishedPostsManager()
-    post_fk_joined_query = PostForeignKeyManager()
+    published_posts = PublishedPostsManager()
+    posts_fk_joined = PostForeignKeyManager()
 
-    class Meta(BaseModel.Meta):
+    class Meta:
         verbose_name = 'публикация'
         verbose_name_plural = 'Публикации'
         ordering = ('-pub_date', 'title')
