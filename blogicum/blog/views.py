@@ -16,14 +16,14 @@ from .forms import CommentForm, PostForm
 from .models import Category, Comment, Post
 
 
-class PostListMixin(ListView):
+class PostListMixin:
     """Базовый класс для вывода множества постов."""
 
     model = Post
     paginate_by = PAGINATE_VALUE
 
 
-class PostListView(PostListMixin):
+class PostListView(PostListMixin, ListView):
     """Вывести на главной странице опубликованные, последние по дате посты."""
 
     template_name = 'blog/index.html'
@@ -109,7 +109,7 @@ class PostDeleteView(PostEditMixin, DeleteView):
         )
 
 
-class CategoryListView(PostListMixin):
+class CategoryListView(PostListMixin, ListView):
     """Отобразить описание категории и список постов запрошенной категории."""
 
     template_name = 'blog/category_detail.html'
@@ -134,7 +134,7 @@ class CategoryListView(PostListMixin):
         return context
 
 
-class ProfileListView(PostListMixin):
+class ProfileListView(PostListMixin, ListView):
     """Информация о пользователе и показ его публикаций."""
 
     template_name = 'blog/profile.html'
