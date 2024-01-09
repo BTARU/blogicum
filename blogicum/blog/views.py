@@ -18,7 +18,6 @@ from .models import Category, Comment, Post
 class PostListMixin(ListView):
     """Базовый класс для вывода множества постов."""
 
-    model = Post
     paginate_by = PAGINATE_VALUE
 
 
@@ -34,7 +33,6 @@ class PostListView(PostListMixin):
 class PostDetailView(DetailView):
     """Вывести обьект поста с блоком комментариев."""
 
-    model = Post
     pk_url_kwarg = 'post_pk'
 
     def get_object(self, queryset=None):
@@ -84,9 +82,11 @@ class PostEditMixin(LoginRequiredMixin, UserPassesTestMixin):
     pk_url_kwarg = 'post_pk'
 
     def test_func(self):
+        """Если не выполняется. Редактирование только для автора поста."""
         return self.get_object().author == self.request.user
 
     def handle_no_permission(self):
+        """If not test_func(). Редирект на get_absolute_url модели."""
         return redirect(self.get_object())
 
 
@@ -144,11 +144,14 @@ class ProfileListView(PostListMixin):
             get_user_model(),
             username=self.kwargs['username']
         )
-        profile_posts = Post.posts_fk_joined.all()
-        if self.request.user != self.profile:
-            profile_posts = Post.published_posts.all()
-        return profile_posts.filter(
-            author__exact=self.profile
+        return Post.posts_fk_joined.filter(
+            (~Q(author=self.request.user.pk)
+             & Q(is_published=True)
+             & Q(category__is_published=True)
+             & Q(pub_date__lt=timezone.now())
+             & Q(author=self.profile)
+             )
+            | Q(author=self.profile)
         ).annotate(
             Count('comments')
         ).order_by('-pub_date')
@@ -162,7 +165,6 @@ class ProfileListView(PostListMixin):
 class ProfileUpdateView(LoginRequiredMixin, UpdateView):
     """Редактирование обьекта пользователя."""
 
-    model = get_user_model()
     slug_url_kwarg = 'username'
     slug_field = 'username'
     template_name = 'blog/user_edit.html'
@@ -170,7 +172,7 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
 
     def get_queryset(self):
         """Пользователь может редактировать только свой профиль."""
-        return self.model.objects.filter(
+        return get_user_model().objects.filter(
             username=self.request.user.username
         )
 
@@ -181,14 +183,14 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
         )
 
 
-class CommentBaseMixin(LoginRequiredMixin):
+class CommentEditMixin(LoginRequiredMixin):
     """Базовый класс для работы с комментариями."""
 
-    model = Comment
+    pk_url_kwarg = 'comment_pk'
 
     def get_queryset(self):
         """Пользователь может работать только со своими комментариями."""
-        return self.model.objects.filter(
+        return Comment.objects.filter(
             post__pk=self.kwargs['post_pk'],
             author=self.request.user
         )
@@ -197,12 +199,11 @@ class CommentBaseMixin(LoginRequiredMixin):
 class CommentCreateView(LoginRequiredMixin, CreateView):
     """Создание обьекта комментария к посту."""
 
-    model = Post
     form_class = CommentForm
 
     def get_object(self, queryset=None):
         return get_object_or_404(
-            self.model.published_posts.all(),
+            Post.published_posts.all(),
             pk=self.kwargs['post_pk']
         )
 
@@ -212,17 +213,15 @@ class CommentCreateView(LoginRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class CommentUpdateView(CommentBaseMixin, UpdateView):
+class CommentUpdateView(CommentEditMixin, UpdateView):
     """Редактирование обьекта комментария его автором."""
 
     form_class = CommentForm
-    pk_url_kwarg = 'comment_pk'
 
 
-class CommentDeleteView(CommentBaseMixin, DeleteView):
+class CommentDeleteView(CommentEditMixin, DeleteView):
     """Удаление обьекта комментария его автором."""
 
-    pk_url_kwarg = 'comment_pk'
     template_name = 'blog/comment_form.html'
 
     def get_success_url(self):
