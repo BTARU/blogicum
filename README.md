@@ -56,3 +56,7 @@ python manage.py migrate
 ```
 python manage.py runserver
 ```
+
+## Автор
+
+[Bulat Ayupov](https://github.com/BTARU)
